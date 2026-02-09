@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -892,12 +893,15 @@ class DataManager {
   }
 }
 
-// ========== REALISTIC CARD WIDGET ==========
-class RealisticPlayingCard extends StatelessWidget {
+// ========== ANIMATED CARD WIDGET ==========
+class RealisticPlayingCard extends StatefulWidget {
   final CardModel card;
   final bool isHidden;
   final double width;
   final double height;
+  final bool dealAnimation;
+  final Duration animationDelay;
+  final bool flipAnimation;
 
   const RealisticPlayingCard({
     super.key,
@@ -905,62 +909,194 @@ class RealisticPlayingCard extends StatelessWidget {
     this.isHidden = false,
     this.width = 80,
     this.height = 110,
+    this.dealAnimation = false,
+    this.animationDelay = Duration.zero,
+    this.flipAnimation = false,
   });
 
   @override
-  Widget build(BuildContext context) {
-    if (isHidden) {
-      return Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.blueGrey[900],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 6,
-              offset: const Offset(2, 2),
-            ),
-          ],
+  State<RealisticPlayingCard> createState() => _RealisticPlayingCardState();
+}
+
+class _RealisticPlayingCardState extends State<RealisticPlayingCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _opacityAnimation;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _rotationAnimation;
+  late Animation<double> _flipAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+
+    if (widget.flipAnimation) {
+      // Flip animation for community cards
+      _flipAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: const Interval(0.0, 1.0, curve: Curves.easeInOut),
         ),
-        child: Center(
-          child: Container(
-            width: width * 0.8,
-            height: height * 0.8,
-            decoration: BoxDecoration(
-              color: Colors.blueGrey[700],
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white30, width: 1),
+      );
+    } else {
+      // Deal animation for player cards
+      _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
+        ),
+      );
+
+      _slideAnimation =
+          Tween<Offset>(
+            begin: const Offset(-1.5, 0.0),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(
+              parent: _controller,
+              curve: const Interval(0.0, 0.7, curve: Curves.easeOutBack),
             ),
-            child: Center(
-              child: Text(
-                '?',
-                style: TextStyle(
-                  fontSize: width * 0.3,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
+          );
+
+      _scaleAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: const Interval(0.1, 0.8, curve: Curves.elasticOut),
+        ),
+      );
+
+      _rotationAnimation = Tween<double>(begin: -0.5, end: 0.0).animate(
+        CurvedAnimation(
+          parent: _controller,
+          curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
         ),
       );
     }
 
+    if (widget.dealAnimation || widget.flipAnimation) {
+      Future.delayed(widget.animationDelay, () {
+        if (mounted) {
+          _controller.forward();
+        }
+      });
+    } else {
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget cardWidget = _buildCard();
+
+    if (widget.flipAnimation) {
+      return AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final angle = _flipAnimation.value * pi;
+          final scale = 1.0 - (_flipAnimation.value * 0.3).abs();
+
+          return Transform(
+            transform: Matrix4.identity()
+              ..setEntry(3, 2, 0.001)
+              ..rotateY(angle)
+              ..scale(scale),
+            alignment: Alignment.center,
+            child: _flipAnimation.value < 0.5 ? _buildCardBack() : _buildCard(),
+          );
+        },
+      );
+    } else if (widget.dealAnimation) {
+      return AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return Transform(
+            transform: Matrix4.identity()..rotateZ(_rotationAnimation.value),
+            alignment: Alignment.center,
+            child: SlideTransition(
+              position: _slideAnimation,
+              child: ScaleTransition(
+                scale: _scaleAnimation,
+                child: FadeTransition(opacity: _opacityAnimation, child: child),
+              ),
+            ),
+          );
+        },
+        child: cardWidget,
+      );
+    } else {
+      return cardWidget;
+    }
+  }
+
+  Widget _buildCardBack() {
     return Container(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
+      decoration: BoxDecoration(
+        color: Colors.blueGrey[900],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 8,
+            offset: const Offset(3, 3),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Container(
+          width: widget.width * 0.8,
+          height: widget.height * 0.8,
+          decoration: BoxDecoration(
+            color: Colors.blueGrey[700],
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.white30, width: 1),
+          ),
+          child: Center(
+            child: Text(
+              '?',
+              style: TextStyle(
+                fontSize: widget.width * 0.3,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard() {
+    if (widget.isHidden) {
+      return _buildCardBack();
+    }
+
+    return Container(
+      width: widget.width,
+      height: widget.height,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.black12, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(2, 2),
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(3, 3),
           ),
         ],
       ),
@@ -986,16 +1122,19 @@ class RealisticPlayingCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  card.rankText,
+                  widget.card.rankText,
                   style: TextStyle(
-                    fontSize: width * 0.2,
+                    fontSize: widget.width * 0.2,
                     fontWeight: FontWeight.bold,
-                    color: card.color,
+                    color: widget.card.color,
                   ),
                 ),
                 Text(
-                  card.suitSymbol,
-                  style: TextStyle(fontSize: width * 0.15, color: card.color),
+                  widget.card.suitSymbol,
+                  style: TextStyle(
+                    fontSize: widget.width * 0.15,
+                    color: widget.card.color,
+                  ),
                 ),
               ],
             ),
@@ -1011,16 +1150,19 @@ class RealisticPlayingCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    card.rankText,
+                    widget.card.rankText,
                     style: TextStyle(
-                      fontSize: width * 0.2,
+                      fontSize: widget.width * 0.2,
                       fontWeight: FontWeight.bold,
-                      color: card.color,
+                      color: widget.card.color,
                     ),
                   ),
                   Text(
-                    card.suitSymbol,
-                    style: TextStyle(fontSize: width * 0.15, color: card.color),
+                    widget.card.suitSymbol,
+                    style: TextStyle(
+                      fontSize: widget.width * 0.15,
+                      color: widget.card.color,
+                    ),
                   ),
                 ],
               ),
@@ -1044,13 +1186,13 @@ class RealisticPlayingCard extends StatelessWidget {
   }
 
   Widget _buildCenterSymbol() {
-    if (card.isFaceCard) {
+    if (widget.card.isFaceCard) {
       return Text(
-        card.faceCardSymbol,
+        widget.card.faceCardSymbol,
         style: TextStyle(
-          fontSize: width * 0.4,
+          fontSize: widget.width * 0.4,
           fontWeight: FontWeight.bold,
-          color: card.color,
+          color: widget.card.color,
         ),
       );
     } else {
@@ -1060,7 +1202,7 @@ class RealisticPlayingCard extends StatelessWidget {
   }
 
   Widget _buildNumberCardSymbols() {
-    final int value = card.value;
+    final int value = widget.card.value;
     List<Widget> symbols = [];
 
     // Different layouts based on card value
@@ -1091,8 +1233,8 @@ class RealisticPlayingCard extends StatelessWidget {
           Positioned(top: 30, left: 20, child: _buildSuitSymbol()),
           Positioned(top: 30, right: 20, child: _buildSuitSymbol()),
           Positioned(
-            top: height * 0.35,
-            left: width * 0.35,
+            top: widget.height * 0.35,
+            left: widget.width * 0.35,
             child: _buildSuitSymbol(),
           ),
           Positioned(bottom: 30, left: 20, child: _buildSuitSymbol()),
@@ -1169,9 +1311,9 @@ class RealisticPlayingCard extends StatelessWidget {
           child: Text(
             'A',
             style: TextStyle(
-              fontSize: width * 0.5,
+              fontSize: widget.width * 0.5,
               fontWeight: FontWeight.bold,
-              color: card.color,
+              color: widget.card.color,
             ),
           ),
         );
@@ -1182,8 +1324,8 @@ class RealisticPlayingCard extends StatelessWidget {
 
   Widget _buildSuitSymbol() {
     return Text(
-      card.suitSymbol,
-      style: TextStyle(fontSize: width * 0.2, color: card.color),
+      widget.card.suitSymbol,
+      style: TextStyle(fontSize: widget.width * 0.2, color: widget.card.color),
     );
   }
 }
@@ -1212,6 +1354,409 @@ class CardCornerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ========== ACTION SELECTION DIALOG ==========
+class ActionSelectionDialog extends StatefulWidget {
+  final Function(GameAction) onActionSelected;
+  final double currentBet;
+  final double playerCurrentBet;
+  final double playerChips;
+  final bool canCheck;
+  final bool canCall;
+  final bool canRaise;
+
+  const ActionSelectionDialog({
+    super.key,
+    required this.onActionSelected,
+    required this.currentBet,
+    required this.playerCurrentBet,
+    required this.playerChips,
+    required this.canCheck,
+    required this.canCall,
+    required this.canRaise,
+  });
+
+  @override
+  State<ActionSelectionDialog> createState() => _ActionSelectionDialogState();
+}
+
+class _ActionSelectionDialogState extends State<ActionSelectionDialog> {
+  bool _showRaiseOptions = false;
+  final TextEditingController _raiseController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'YOUR TURN',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue[800],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Current Bet: \$${widget.currentBet.toStringAsFixed(0)}',
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              'Your Chips: \$${widget.playerChips.toStringAsFixed(0)}',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+
+            if (!_showRaiseOptions) ...[
+              // Main action buttons
+              _buildActionButton(
+                'FOLD',
+                Colors.red,
+                Icons.close,
+                () => widget.onActionSelected(GameAction.fold),
+              ),
+              const SizedBox(height: 10),
+
+              if (widget.canCheck)
+                _buildActionButton(
+                  'CHECK',
+                  Colors.blue,
+                  Icons.check,
+                  () => widget.onActionSelected(GameAction.check),
+                ),
+
+              if (widget.canCall && !widget.canCheck)
+                _buildActionButton(
+                  'CALL \$${(widget.currentBet - widget.playerCurrentBet).toStringAsFixed(0)}',
+                  Colors.green,
+                  Icons.call_received,
+                  () => widget.onActionSelected(GameAction.call),
+                ),
+
+              const SizedBox(height: 10),
+
+              if (widget.canRaise)
+                _buildActionButton(
+                  'RAISE',
+                  Colors.orange,
+                  Icons.trending_up,
+                  () => setState(() => _showRaiseOptions = true),
+                ),
+
+              const SizedBox(height: 10),
+
+              _buildActionButton(
+                'ALL-IN \$${widget.playerChips.toStringAsFixed(0)}',
+                Colors.purple,
+                Icons.all_inclusive,
+                () => widget.onActionSelected(GameAction.allIn),
+              ),
+            ] else ...[
+              // Raise options
+              Text(
+                'ENTER RAISE AMOUNT',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange[800],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: _raiseController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Raise to',
+                  prefixText: '\$',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  hintText:
+                      'Minimum: \$${(widget.currentBet * 1.5).toStringAsFixed(0)}',
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => setState(() => _showRaiseOptions = false),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text('BACK'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      final amount = double.tryParse(_raiseController.text);
+                      if (amount != null && amount > widget.currentBet) {
+                        Navigator.pop(context);
+                        widget.onActionSelected(GameAction.raise);
+                        // In actual implementation, you would pass the raise amount
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Invalid raise amount'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text('RAISE'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    String label,
+    Color color,
+    IconData icon,
+    VoidCallback onPressed,
+  ) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: Icon(icon, size: 20),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+// ========== MINI ACTION PANEL ==========
+class MiniActionPanel extends StatefulWidget {
+  final Function(GameAction) onActionSelected;
+  final double currentBet;
+  final double playerCurrentBet;
+  final double playerChips;
+  final bool canCheck;
+  final bool canCall;
+  final bool canRaise;
+  final Duration autoFoldDuration;
+  final Function() onAutoFold;
+
+  const MiniActionPanel({
+    super.key,
+    required this.onActionSelected,
+    required this.currentBet,
+    required this.playerCurrentBet,
+    required this.playerChips,
+    required this.canCheck,
+    required this.canCall,
+    required this.canRaise,
+    this.autoFoldDuration = const Duration(seconds: 15),
+    required this.onAutoFold,
+  });
+
+  @override
+  State<MiniActionPanel> createState() => _MiniActionPanelState();
+}
+
+class _MiniActionPanelState extends State<MiniActionPanel> {
+  late Timer _autoFoldTimer;
+  int _secondsRemaining = 15;
+
+  @override
+  void initState() {
+    super.initState();
+    _startAutoFoldTimer();
+  }
+
+  void _startAutoFoldTimer() {
+    _secondsRemaining = widget.autoFoldDuration.inSeconds;
+    _autoFoldTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsRemaining--;
+      });
+
+      if (_secondsRemaining <= 0) {
+        timer.cancel();
+        widget.onAutoFold();
+      }
+    });
+  }
+
+  void _resetTimer() {
+    _autoFoldTimer.cancel();
+    _startAutoFoldTimer();
+  }
+
+  @override
+  void dispose() {
+    _autoFoldTimer.cancel();
+    super.dispose();
+  }
+
+  void _selectAction(GameAction action) {
+    _autoFoldTimer.cancel();
+    widget.onActionSelected(action);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.all(8),
+      elevation: 8,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            // Timer indicator
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.timer,
+                  size: 16,
+                  color: _secondsRemaining <= 5 ? Colors.red : Colors.blue,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Auto-fold in $_secondsRemaining seconds',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _secondsRemaining <= 5 ? Colors.red : Colors.grey,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Progress bar
+            LinearProgressIndicator(
+              value: _secondsRemaining / widget.autoFoldDuration.inSeconds,
+              backgroundColor: Colors.grey[200],
+              valueColor: AlwaysStoppedAnimation<Color>(
+                _secondsRemaining <= 5 ? Colors.red : Colors.blue,
+              ),
+              minHeight: 4,
+            ),
+            const SizedBox(height: 12),
+
+            // Action buttons in a grid
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 2.5,
+              children: [
+                // Fold button
+                _buildMiniActionButton(
+                  'FOLD',
+                  Colors.red,
+                  Icons.close,
+                  () => _selectAction(GameAction.fold),
+                ),
+
+                // Check/Call button
+                if (widget.canCheck)
+                  _buildMiniActionButton(
+                    'CHECK',
+                    Colors.blue,
+                    Icons.check,
+                    () => _selectAction(GameAction.check),
+                  )
+                else if (widget.canCall)
+                  _buildMiniActionButton(
+                    'CALL \$${(widget.currentBet - widget.playerCurrentBet).toStringAsFixed(0)}',
+                    Colors.green,
+                    Icons.call_received,
+                    () => _selectAction(GameAction.call),
+                  ),
+
+                // Raise button
+                if (widget.canRaise)
+                  _buildMiniActionButton(
+                    'RAISE',
+                    Colors.orange,
+                    Icons.trending_up,
+                    () => _selectAction(GameAction.raise),
+                  ),
+
+                // All-in button
+                _buildMiniActionButton(
+                  'ALL-IN',
+                  Colors.purple,
+                  Icons.all_inclusive,
+                  () => _selectAction(GameAction.allIn),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Info text
+            Text(
+              'Bet: \$${widget.currentBet.toStringAsFixed(0)} | Chips: \$${widget.playerChips.toStringAsFixed(0)}',
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMiniActionButton(
+    String label,
+    Color color,
+    IconData icon,
+    VoidCallback onPressed,
+  ) {
+    return ElevatedButton.icon(
+      onPressed: () {
+        _resetTimer();
+        onPressed();
+      },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      ),
+      icon: Icon(icon, size: 14),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
 }
 
 // ========== MAIN APP ==========
@@ -1936,6 +2481,20 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
   bool _showRaiseDialog = false;
   List<String> _actionLog = [];
 
+  // Animation states
+  bool _isDealingCards = false;
+  List<bool> _playerCardsDealt = [false, false, false, false, false, false];
+  List<bool> _communityCardsAnimation = [false, false, false, false, false];
+  int _currentDealingPlayer = 0;
+  int _currentDealingCard = 0;
+  int _currentDealingCommunityCard = 0;
+  bool _isDealingCommunityCards = false;
+
+  // Mini action panel
+  bool _showMiniActionPanel = false;
+  Timer? _autoFoldTimer;
+  int _secondsRemaining = 15;
+
   @override
   void initState() {
     super.initState();
@@ -1990,37 +2549,126 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
 
     setState(() {
       _isGameActive = true;
-      _gameMessage = 'Game started! Your turn.';
+      _isDealingCards = true;
+      _gameMessage = 'Dealing cards...';
     });
 
-    // Process AI actions until human's turn
-    _processAITurns();
+    // Start dealing cards animation
+    _startDealingCards();
   }
 
-  void _processAITurns() {
-    if (_game == null || _game!.isGameOver) return;
+  void _startDealingCards() {
+    // Reset animation states
+    _playerCardsDealt = List.filled(6, false);
+    _communityCardsAnimation = List.filled(5, false);
+    _currentDealingPlayer = 0;
+    _currentDealingCard = 0;
+    _currentDealingCommunityCard = 0;
+    _isDealingCommunityCards = false;
 
-    // Check if it's AI's turn
-    if (_game!.players[_game!.currentPlayerIndex].isAI) {
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (_game != null && !_game!.isGameOver) {
-          final aiPlayer = _game!.players[_game!.currentPlayerIndex];
-          _game!.makeAIAction();
-          _addLog('${aiPlayer.name}: ${aiPlayer.lastAction}');
+    // Start dealing hole cards
+    _dealNextHoleCard();
+  }
 
-          if (!_game!.isGameOver &&
-              _game!.players[_game!.currentPlayerIndex].isAI) {
-            // Continue processing AI turns
-            _processAITurns();
-          } else if (_game!.isGameOver) {
-            _endGame();
-          } else {
-            setState(() {
-              _gameMessage = 'Your turn. ${_getCurrentBetInfo()}';
-            });
+  void _dealNextHoleCard() {
+    if (_currentDealingCard < 2) {
+      // Deal to current player
+      Future.delayed(const Duration(milliseconds: 200), () {
+        setState(() {
+          if (_currentDealingPlayer < _game!.players.length) {
+            _playerCardsDealt[_currentDealingPlayer] = true;
+            _currentDealingPlayer++;
           }
-        }
+
+          if (_currentDealingPlayer >= _game!.players.length) {
+            // Move to next card
+            _currentDealingPlayer = 0;
+            _currentDealingCard++;
+          }
+
+          _dealNextHoleCard();
+        });
       });
+    } else {
+      // All hole cards dealt, start game
+      Future.delayed(const Duration(milliseconds: 500), () {
+        setState(() {
+          _isDealingCards = false;
+          _gameMessage = 'Game started! Your turn.';
+        });
+        _processAITurns();
+      });
+    }
+  }
+
+  void _dealCommunityCardsOneByOne() {
+    if (_game == null || _game!.communityCards.isEmpty) return;
+
+    setState(() {
+      _isDealingCommunityCards = true;
+      _communityCardsAnimation = List.filled(
+        _game!.communityCards.length,
+        false,
+      );
+      _currentDealingCommunityCard = 0;
+      _gameMessage = 'Dealing community cards...';
+    });
+
+    _dealNextCommunityCard();
+  }
+
+  void _dealNextCommunityCard() {
+    if (_currentDealingCommunityCard < _game!.communityCards.length) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        setState(() {
+          _communityCardsAnimation[_currentDealingCommunityCard] = true;
+          _currentDealingCommunityCard++;
+          _dealNextCommunityCard();
+        });
+      });
+    } else {
+      // All community cards dealt
+      Future.delayed(const Duration(milliseconds: 300), () {
+        setState(() {
+          _isDealingCommunityCards = false;
+          _gameMessage = '${_getRoundName(_game!.currentRound)} complete!';
+        });
+
+        // Continue with AI turns after dealing
+        _processAITurns();
+      });
+    }
+  }
+
+  void _displayMiniActionPanelForGame() {
+    _autoFoldTimer?.cancel();
+    setState(() {
+      _showMiniActionPanel = true;
+      _secondsRemaining = 15;
+    });
+
+    _autoFoldTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsRemaining--;
+      });
+
+      if (_secondsRemaining <= 0) {
+        timer.cancel();
+        _autoFold();
+      }
+    });
+  }
+
+  String _getRoundName(BettingRound round) {
+    switch (round) {
+      case BettingRound.flop:
+        return 'Flop';
+      case BettingRound.turn:
+        return 'Turn';
+      case BettingRound.river:
+        return 'River';
+      default:
+        return round.toString().split('.').last;
     }
   }
 
@@ -2030,7 +2678,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
   }
 
   void _makeAction(GameAction action, {double? raiseAmount}) {
-    if (_game == null || _game!.isGameOver) return;
+    if (_game == null || _game!.isGameOver || _isDealingCommunityCards) return;
 
     final player = _game!.players[_game!.currentPlayerIndex];
     if (player.isAI) {
@@ -2042,6 +2690,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
 
     if (success) {
       _addLog('${player.name}: ${player.lastAction}');
+      _hideMiniActionPanel();
 
       if (_game!.isGameOver) {
         _endGame();
@@ -2083,6 +2732,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
       _addLog('Pot: \$${_game!.pot.toStringAsFixed(0)}');
     }
 
+    _hideMiniActionPanel();
     setState(() {});
   }
 
@@ -2152,6 +2802,113 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
     _makeAction(GameAction.allIn);
   }
 
+  void _displayMiniActionPanel() {
+    if (_game == null ||
+        _game!.isGameOver ||
+        _game!.players[_game!.currentPlayerIndex].isAI ||
+        _isDealingCards ||
+        _isDealingCommunityCards) {
+      return;
+    }
+
+    setState(() {
+      _showMiniActionPanel = true;
+      _secondsRemaining = 15;
+    });
+
+    // Start auto-fold timer
+    _autoFoldTimer?.cancel();
+    _autoFoldTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsRemaining--;
+      });
+
+      if (_secondsRemaining <= 0) {
+        timer.cancel();
+        _autoFold();
+      }
+    });
+  }
+
+  void _hideMiniActionPanel() {
+    _autoFoldTimer?.cancel();
+    setState(() {
+      _showMiniActionPanel = false;
+    });
+  }
+
+  void _autoFold() {
+    _addLog('${_humanPlayer!.name}: Auto-fold (timeout)');
+    _makeAction(GameAction.fold);
+  }
+
+  void _processAITurns() {
+    if (_game == null || _game!.isGameOver || _isDealingCommunityCards) return;
+
+    // Check if it's AI's turn
+    if (_game!.players[_game!.currentPlayerIndex].isAI) {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (_game != null && !_game!.isGameOver) {
+          final aiPlayer = _game!.players[_game!.currentPlayerIndex];
+          _game!.makeAIAction();
+          _addLog('${aiPlayer.name}: ${aiPlayer.lastAction}');
+
+          // Check if we need to deal community cards
+          if (_shouldDealCommunityCards()) {
+            // Start dealing community cards animation
+            _dealCommunityCardsOneByOne();
+            return;
+          }
+
+          if (!_game!.isGameOver &&
+              _game!.players[_game!.currentPlayerIndex].isAI &&
+              !_isDealingCommunityCards) {
+            // Continue processing AI turns
+            _processAITurns();
+          } else if (_game!.isGameOver) {
+            _endGame();
+          } else if (!_isDealingCommunityCards) {
+            setState(() {
+              _gameMessage = 'Your turn. ${_getCurrentBetInfo()}';
+            });
+            // Show mini action panel for human player
+            _displayMiniActionPanel();
+          }
+        }
+      });
+    } else {
+      // Human player's turn - show mini action panel
+      // _showMiniActionPanel();
+    }
+  }
+
+  bool _shouldDealCommunityCards() {
+    if (_game == null) return false;
+
+    // Check if betting round is complete and we need to deal community cards
+    if (_game!.currentRound == BettingRound.preflop &&
+        _game!.communityCards.isEmpty) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.flop &&
+        _game!.communityCards.length == 3) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.turn &&
+        _game!.communityCards.length == 4) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.river &&
+        _game!.communityCards.length == 5) {
+      return true;
+    }
+
+    return false;
+  }
+
+  @override
+  void dispose() {
+    _autoFoldTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = _dataManager.currentUser;
@@ -2184,6 +2941,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                           _isGameActive = false;
                           _gameMessage = '';
                           _actionLog.clear();
+                          _hideMiniActionPanel();
                           _addLog('Welcome to Texas Hold\'em!');
                           setState(() {});
                         },
@@ -2360,52 +3118,107 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                   child: Column(
                     children: [
                       // Community Cards
-                      if (_game?.communityCards.isNotEmpty ?? false)
-                        Card(
-                          margin: const EdgeInsets.all(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                Text(
-                                  _game!.currentRound == BettingRound.showdown
-                                      ? 'SHOWDOWN'
-                                      : 'COMMUNITY CARDS',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green,
-                                  ),
+                      Card(
+                        margin: const EdgeInsets.all(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              Text(
+                                _game!.currentRound == BettingRound.showdown
+                                    ? 'SHOWDOWN'
+                                    : 'COMMUNITY CARDS (${_game!.communityCards.length})',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
                                 ),
-                                const SizedBox(height: 12),
+                              ),
+                              const SizedBox(height: 12),
+                              if (_game!.communityCards.isNotEmpty)
                                 Wrap(
                                   spacing: 8,
                                   alignment: WrapAlignment.center,
-                                  children: _game!.communityCards.map((card) {
-                                    return RealisticPlayingCard(
-                                      card: card,
-                                      width: 60,
-                                      height: 80,
-                                    );
-                                  }).toList(),
-                                ),
-                                if (_game!.currentRound ==
-                                    BettingRound.showdown)
-                                  const SizedBox(height: 12),
-                                if (_game!.currentRound ==
-                                    BettingRound.showdown)
-                                  Text(
-                                    'Showdown! Compare hands',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.green[700],
-                                      fontWeight: FontWeight.bold,
+                                  children: _game!.communityCards
+                                      .asMap()
+                                      .entries
+                                      .map((entry) {
+                                        final index = entry.key;
+                                        final card = entry.value;
+                                        return RealisticPlayingCard(
+                                          card: card,
+                                          width: 60,
+                                          height: 80,
+                                          dealAnimation:
+                                              _communityCardsAnimation[index],
+                                          animationDelay: Duration(
+                                            milliseconds: index * 300,
+                                          ),
+                                          flipAnimation: true,
+                                        );
+                                      })
+                                      .toList(),
+                                )
+                              else
+                                Container(
+                                  width: 200,
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[200],
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.grey[300]!,
                                     ),
                                   ),
-                              ],
-                            ),
+                                  child: Center(
+                                    child: Text(
+                                      '${_getRoundName(_game!.currentRound)} cards will be dealt',
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_game!.currentRound == BettingRound.showdown)
+                                const SizedBox(height: 12),
+                              if (_game!.currentRound == BettingRound.showdown)
+                                Text(
+                                  'Showdown! Compare hands',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              if (_isDealingCommunityCards)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.green,
+                                            ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Dealing ${_getRoundName(_game!.currentRound)}...',
+                                        style: const TextStyle(
+                                          color: Colors.green,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
+                      ),
 
                       // Players
                       GridView.count(
@@ -2423,6 +3236,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                               final isHuman = !player.isAI;
                               final isFolded = player.isFolded;
                               final isAllIn = player.isAllIn;
+                              final cardsDealt = _playerCardsDealt[index];
 
                               return Card(
                                 margin: const EdgeInsets.all(4),
@@ -2518,7 +3332,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                                             color: Colors.grey[600],
                                           ),
                                         ),
-                                      if (!isFolded)
+                                      if (!isFolded && cardsDealt)
                                         Row(
                                           children: [
                                             if (player.cards.isNotEmpty)
@@ -2530,6 +3344,10 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                                                         BettingRound.showdown,
                                                 width: 30,
                                                 height: 40,
+                                                dealAnimation: true,
+                                                animationDelay: Duration(
+                                                  milliseconds: index * 150,
+                                                ),
                                               ),
                                             const SizedBox(width: 2),
                                             if (player.cards.length > 1)
@@ -2541,6 +3359,11 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                                                         BettingRound.showdown,
                                                 width: 30,
                                                 height: 40,
+                                                dealAnimation: true,
+                                                animationDelay: Duration(
+                                                  milliseconds:
+                                                      (index * 150) + 100,
+                                                ),
                                               ),
                                           ],
                                         ),
@@ -2619,71 +3442,24 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                   ),
                 ),
 
-              // Action Buttons
-              if (_game != null &&
-                  !_game!.isGameOver &&
-                  !_game!.players[_game!.currentPlayerIndex].isAI)
-                Card(
-                  margin: const EdgeInsets.all(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildActionButton(
-                              'FOLD',
-                              Colors.red,
-                              Icons.close,
-                              _fold,
-                              enabled: true,
-                            ),
-                            _buildActionButton(
-                              'CHECK',
-                              Colors.blue,
-                              Icons.check,
-                              _check,
-                              enabled:
-                                  _humanPlayer?.canCheck(_game!.currentBet) ??
-                                  false,
-                            ),
-                            _buildActionButton(
-                              'CALL \$${(_game!.currentBet - (_humanPlayer?.currentBet ?? 0)).toStringAsFixed(0)}',
-                              Colors.green,
-                              Icons.call_received,
-                              _call,
-                              enabled:
-                                  _humanPlayer?.canCall(_game!.currentBet) ??
-                                  false,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildActionButton(
-                              'RAISE',
-                              Colors.orange,
-                              Icons.trending_up,
-                              _raise,
-                              enabled:
-                                  (_humanPlayer?.chips ?? 0) >
-                                  _game!.currentBet,
-                            ),
-                            _buildActionButton(
-                              'ALL-IN \$${_humanPlayer?.chips.toStringAsFixed(0) ?? '0'}',
-                              Colors.purple,
-                              Icons.all_inclusive,
-                              _allIn,
-                              enabled: (_humanPlayer?.chips ?? 0) > 0,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+              // Mini Action Panel
+              if (_showMiniActionPanel && _game != null && _humanPlayer != null)
+                MiniActionPanel(
+                  onActionSelected: (action) {
+                    if (action == GameAction.raise) {
+                      // Show raise dialog
+                      _raise();
+                    } else {
+                      _makeAction(action);
+                    }
+                  },
+                  currentBet: _game!.currentBet,
+                  playerCurrentBet: _humanPlayer!.currentBet,
+                  playerChips: _humanPlayer!.chips,
+                  canCheck: _humanPlayer!.canCheck(_game!.currentBet),
+                  canCall: _humanPlayer!.canCall(_game!.currentBet),
+                  canRaise: _humanPlayer!.chips > _game!.currentBet,
+                  onAutoFold: _autoFold,
                 ),
 
               // Game Over Buttons
@@ -2699,6 +3475,7 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
                             _isGameActive = false;
                             _gameMessage = '';
                             _actionLog.clear();
+                            _hideMiniActionPanel();
                             _addLog('Welcome to Texas Hold\'em!');
                             setState(() {});
                           },
@@ -2737,37 +3514,6 @@ class _TexasHoldemPageState extends State<TexasHoldemPage> {
       ),
     );
   }
-
-  Widget _buildActionButton(
-    String label,
-    Color color,
-    IconData icon,
-    VoidCallback onPressed, {
-    required bool enabled,
-  }) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: ElevatedButton.icon(
-          onPressed: enabled ? onPressed : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: color,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          ),
-          icon: Icon(icon, size: 20),
-          label: Text(
-            label,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 // ========== 1 VS 1 PAGE ==========
@@ -2787,6 +3533,12 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
   bool _isGameActive = false;
   Player? _humanPlayer;
   String _gameMessage = '';
+  bool _isDealingCards = false;
+  List<bool> _communityCardsAnimation = [false, false, false, false, false];
+  bool _isDealingCommunityCards = false;
+  bool _showMiniActionPanel = false;
+  Timer? _autoFoldTimer;
+  int _secondsRemaining = 15;
 
   void _startGame() async {
     final bet = double.tryParse(_betController.text);
@@ -2812,32 +3564,123 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
 
     setState(() {
       _isGameActive = true;
-      _gameMessage = 'Game started! Your turn.';
+      _isDealingCards = true;
+      _gameMessage = 'Dealing cards...';
+    });
+
+    // Start dealing animation
+    Future.delayed(const Duration(seconds: 2), () {
+      setState(() {
+        _isDealingCards = false;
+        _gameMessage = 'Game started! Your turn.';
+      });
+      _showMiniActionPanelForGame();
     });
 
     // Process AI turn if needed
     _processAITurn();
   }
 
+  void _dealCommunityCardsOneByOne() {
+    if (_game == null || _game!.communityCards.isEmpty) return;
+
+    setState(() {
+      _isDealingCommunityCards = true;
+      _communityCardsAnimation = List.filled(
+        _game!.communityCards.length,
+        false,
+      );
+      _gameMessage = 'Dealing community cards...';
+    });
+
+    _dealNextCommunityCard(0);
+  }
+
+  void _dealNextCommunityCard(int index) {
+    if (index < _game!.communityCards.length) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        setState(() {
+          _communityCardsAnimation[index] = true;
+          _dealNextCommunityCard(index + 1);
+        });
+      });
+    } else {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        setState(() {
+          _isDealingCommunityCards = false;
+        });
+        _processAITurn();
+      });
+    }
+  }
+
+  void _showMiniActionPanelForGame() {
+    _autoFoldTimer?.cancel();
+    setState(() {
+      _showMiniActionPanel = true;
+      _secondsRemaining = 15;
+    });
+
+    _autoFoldTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsRemaining--;
+      });
+
+      if (_secondsRemaining <= 0) {
+        timer.cancel();
+        _autoFold();
+      }
+    });
+  }
+
   void _processAITurn() {
-    if (_game == null || _game!.isGameOver) return;
+    if (_game == null || _game!.isGameOver || _isDealingCommunityCards) return;
 
     if (_game!.players[_game!.currentPlayerIndex].isAI) {
+      _hideMiniActionPanel();
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (_game != null && !_game!.isGameOver) {
           _game!.makeAIAction();
           setState(() {});
 
+          // Check if we need to deal community cards
+          if (_shouldDealCommunityCards()) {
+            _dealCommunityCardsOneByOne();
+          }
+
           if (_game!.isGameOver) {
             _endGame();
+          } else {
+            _showMiniActionPanelForGame();
           }
         }
       });
     }
   }
 
+  bool _shouldDealCommunityCards() {
+    if (_game == null) return false;
+
+    // Check if betting round is complete and we need to deal community cards
+    if (_game!.currentRound == BettingRound.preflop &&
+        _game!.communityCards.isEmpty) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.flop &&
+        _game!.communityCards.length == 3) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.turn &&
+        _game!.communityCards.length == 4) {
+      return true;
+    } else if (_game!.currentRound == BettingRound.river &&
+        _game!.communityCards.length == 5) {
+      return true;
+    }
+
+    return false;
+  }
+
   void _makeAction(GameAction action, {double? raiseAmount}) {
-    if (_game == null || _game!.isGameOver) return;
+    if (_game == null || _game!.isGameOver || _isDealingCommunityCards) return;
 
     final player = _game!.players[_game!.currentPlayerIndex];
     if (player.isAI) {
@@ -2848,6 +3691,7 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
     bool success = _game!.makeAction(action, raiseAmount: raiseAmount);
 
     if (success) {
+      _hideMiniActionPanel();
       if (_game!.isGameOver) {
         _endGame();
       } else {
@@ -2883,6 +3727,7 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
           : 'AI Opponent wins!';
     }
 
+    _hideMiniActionPanel();
     setState(() {});
   }
 
@@ -2890,6 +3735,23 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.blue),
     );
+  }
+
+  void _hideMiniActionPanel() {
+    _autoFoldTimer?.cancel();
+    setState(() {
+      _showMiniActionPanel = false;
+    });
+  }
+
+  void _autoFold() {
+    _makeAction(GameAction.fold);
+  }
+
+  @override
+  void dispose() {
+    _autoFoldTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -3044,6 +3906,96 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                         ),
                       ),
 
+                      // Community Cards
+                      Card(
+                        margin: const EdgeInsets.all(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              const Text(
+                                'COMMUNITY CARDS',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              if (_game?.communityCards.isNotEmpty ?? false)
+                                Wrap(
+                                  spacing: 8,
+                                  alignment: WrapAlignment.center,
+                                  children: _game!.communityCards
+                                      .asMap()
+                                      .entries
+                                      .map((entry) {
+                                        final index = entry.key;
+                                        final card = entry.value;
+                                        return RealisticPlayingCard(
+                                          card: card,
+                                          width: 60,
+                                          height: 80,
+                                          dealAnimation:
+                                              _communityCardsAnimation[index],
+                                          animationDelay: Duration(
+                                            milliseconds: index * 300,
+                                          ),
+                                          flipAnimation: true,
+                                        );
+                                      })
+                                      .toList(),
+                                )
+                              else
+                                Container(
+                                  width: 200,
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[200],
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.grey[300]!,
+                                    ),
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      'Community cards will be dealt',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (_isDealingCommunityCards)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.green,
+                                            ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Dealing cards...',
+                                        style: TextStyle(
+                                          color: Colors.green,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                       // AI Player
                       Card(
                         margin: const EdgeInsets.all(16),
@@ -3078,6 +4030,10 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                                           BettingRound.showdown,
                                       width: 70,
                                       height: 95,
+                                      dealAnimation: true,
+                                      animationDelay: const Duration(
+                                        milliseconds: 200,
+                                      ),
                                     ),
                                   const SizedBox(width: 8),
                                   if ((_game?.players[1].cards.length ?? 0) > 1)
@@ -3088,6 +4044,10 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                                           BettingRound.showdown,
                                       width: 70,
                                       height: 95,
+                                      dealAnimation: true,
+                                      animationDelay: const Duration(
+                                        milliseconds: 400,
+                                      ),
                                     ),
                                 ],
                               ),
@@ -3107,39 +4067,6 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                           ),
                         ),
                       ),
-
-                      // Community Cards
-                      if (_game?.communityCards.isNotEmpty ?? false)
-                        Card(
-                          margin: const EdgeInsets.all(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                const Text(
-                                  'COMMUNITY CARDS',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Wrap(
-                                  spacing: 8,
-                                  alignment: WrapAlignment.center,
-                                  children: _game!.communityCards.map((card) {
-                                    return RealisticPlayingCard(
-                                      card: card,
-                                      width: 60,
-                                      height: 80,
-                                    );
-                                  }).toList(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
 
                       // Human Player
                       Card(
@@ -3171,6 +4098,10 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                                       card: _humanPlayer!.cards[0],
                                       width: 70,
                                       height: 95,
+                                      dealAnimation: true,
+                                      animationDelay: const Duration(
+                                        milliseconds: 100,
+                                      ),
                                     ),
                                   const SizedBox(width: 8),
                                   if ((_humanPlayer?.cards.length ?? 0) > 1)
@@ -3178,6 +4109,10 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                                       card: _humanPlayer!.cards[1],
                                       width: 70,
                                       height: 95,
+                                      dealAnimation: true,
+                                      animationDelay: const Duration(
+                                        milliseconds: 300,
+                                      ),
                                     ),
                                 ],
                               ),
@@ -3204,83 +4139,30 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                           ),
                         ),
 
-                      // Action Buttons
-                      if (_game != null &&
-                          !_game!.isGameOver &&
-                          !_game!.players[_game!.currentPlayerIndex].isAI)
-                        Card(
-                          margin: const EdgeInsets.all(8),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    _buildActionButton(
-                                      'FOLD',
-                                      Colors.red,
-                                      Icons.close,
-                                      () => _makeAction(GameAction.fold),
-                                    ),
-                                    _buildActionButton(
-                                      'CHECK',
-                                      Colors.blue,
-                                      Icons.check,
-                                      () => _makeAction(GameAction.check),
-                                      enabled:
-                                          _humanPlayer?.canCheck(
-                                            _game!.currentBet,
-                                          ) ??
-                                          false,
-                                    ),
-                                    _buildActionButton(
-                                      'CALL',
-                                      Colors.green,
-                                      Icons.call_received,
-                                      () => _makeAction(GameAction.call),
-                                      enabled:
-                                          _humanPlayer?.canCall(
-                                            _game!.currentBet,
-                                          ) ??
-                                          false,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    _buildActionButton(
-                                      'RAISE',
-                                      Colors.orange,
-                                      Icons.trending_up,
-                                      () {
-                                        // Simple raise for 1vs1
-                                        double raiseTo = _game!.currentBet * 2;
-                                        _makeAction(
-                                          GameAction.raise,
-                                          raiseAmount: raiseTo,
-                                        );
-                                      },
-                                      enabled:
-                                          (_humanPlayer?.chips ?? 0) >
-                                          _game!.currentBet,
-                                    ),
-                                    _buildActionButton(
-                                      'ALL-IN',
-                                      Colors.purple,
-                                      Icons.all_inclusive,
-                                      () => _makeAction(GameAction.allIn),
-                                      enabled: (_humanPlayer?.chips ?? 0) > 0,
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
+                      // Mini Action Panel
+                      if (_showMiniActionPanel &&
+                          _game != null &&
+                          _humanPlayer != null)
+                        MiniActionPanel(
+                          onActionSelected: (action) {
+                            if (action == GameAction.raise) {
+                              // Simple raise for 1vs1
+                              double raiseTo = _game!.currentBet * 2;
+                              _makeAction(
+                                GameAction.raise,
+                                raiseAmount: raiseTo,
+                              );
+                            } else {
+                              _makeAction(action);
+                            }
+                          },
+                          currentBet: _game!.currentBet,
+                          playerCurrentBet: _humanPlayer!.currentBet,
+                          playerChips: _humanPlayer!.chips,
+                          canCheck: _humanPlayer!.canCheck(_game!.currentBet),
+                          canCall: _humanPlayer!.canCall(_game!.currentBet),
+                          canRaise: _humanPlayer!.chips > _game!.currentBet,
+                          onAutoFold: _autoFold,
                         ),
 
                       // Game Over Buttons
@@ -3295,6 +4177,7 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
                                     _game = null;
                                     _isGameActive = false;
                                     _gameMessage = '';
+                                    _hideMiniActionPanel();
                                     setState(() {});
                                   },
                                   style: ElevatedButton.styleFrom(
@@ -3336,36 +4219,6 @@ class _OneVsOnePageState extends State<OneVsOnePage> {
               ),
             ],
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton(
-    String label,
-    Color color,
-    IconData icon,
-    VoidCallback onPressed, {
-    bool enabled = true,
-  }) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: ElevatedButton.icon(
-          onPressed: enabled ? onPressed : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: color,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          ),
-          icon: Icon(icon, size: 20),
-          label: Text(
-            label,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-          ),
         ),
       ),
     );
